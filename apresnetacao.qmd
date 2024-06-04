@@ -1,0 +1,623 @@
+---
+title: "Estudo do Pacote Flexmix"
+lightbox: true
+format:
+  html:
+    theme: cosmo
+    toc: true
+    toc-title: Conteúdo
+    number-sections: true
+    embed-resources: true
+    minimal: false
+---
+
+
+# O pacote
+
+
+O trabalho desenvolvido teve como objetivo estudar o pacote **Flexmix** e compara-lo com demais técnicas de clusterização.
+
+O pacote trás como sua principal funcionalidade a capacidade de ajustar diferentes distribuições para as misturas, se caracterizando como um framework de misturas de modelos lineares generalizados, semi paramétrico e não paramétrico
+
+O pacote já está disponível no cran, através de [https://cran.r-project.org/web/packages/flexmix/index.html](https://cran.r-project.org/web/packages/flexmix/index.html)
+
+O autor também oferece diversos artigos em forma de vignetes
+
+* [Finite Mixture Model Diagnostics Using Resampling Methods](https://cran.r-project.org/web/packages/flexmix/vignettes/bootstrapping.pdf)
+
+* [FlexMix: A General Framework for Finite Mixture Models and Latent Class Regression in R](https://cran.r-project.org/web/packages/flexmix/vignettes/flexmix-intro.pdf)
+
+* [FlexMix Version 2: Finite Mixtures with Concomitant Variables and Varying and Constant Parameters](https://cran.r-project.org/web/packages/flexmix/vignettes/mixture-regressions.pdf)
+
+* [Applications of finite mixtures of regression models](https://cran.r-project.org/web/packages/flexmix/vignettes/regression-examples.pdf)
+
+# Aplicação em Dados Reais
+
+```{r}
+#| echo: false
+#| message: false
+#| warning: false
+
+library(flexmix)
+library(tidyverse)
+library(tidyr)
+library(factoextra)
+library(cluster)
+library(ggplot2)
+```
+
+
+A primeira etapa do trabalho se baseia na aplicação de diferentes métodos de agrupamento
+
+Os dados utilizados foram retirados do e se referem a medidas de pinguins adultos perto da Estação Palmer, Antártida (Palmer Station)
+
+
+
+```{r}
+df_pengu = palmerpenguins::penguins %>%
+  filter(complete.cases(.)) |>
+  select(-year)
+
+df_pengu |>
+  rmarkdown::paged_table()
+```
+
+O conjunto de dados possui as seguintes variáveis
+
+* **species**
+  - Um fator com as espécies de pinguim (Adelie, Gentoo e Chinstrap)
+
+* **island**
+  - Um fator com cada ilha do Arquipélago Palmer, na Antártida (Biscoe, Dream, Togersen)
+
+* **bill_length_mm**
+  - Um número inteiro que indica o comprimento do bico (em milímetros)
+
+* **bill_depth_mm**
+  - Um número inteiro que indica a profundidade do bico (em milímetros)
+  
+* **flipper_length_mm**
+  - Um número inteiro que indica o comprimento da nadadeira (em milímetros)
+  
+* **body_mass_g**
+  - Um número inteiro que indica a massa corporal (em gramas)
+  
+* **sex**
+  - Um fator que indica o sexo do(a) pinguim (macho, fêmea)
+  
+
+![Os Penguinos](D:/UFJF_materias/AprendizadoMaquina/density_cluster/files/penguins.png){width=70%}
+
+As 3 variáveis categóricas podem se mostrar de interesse para construção de grupos
+
+```{r}
+df_pengu |>
+  group_by(
+    across(
+      where(is.factor)
+      )
+    ) |>
+  summarise(
+    across(
+      where(is.numeric),
+      ~mean(.)
+      )
+    ) |>
+  rmarkdown::paged_table()
+  
+```
+
+```{r}
+df_pengu  |>
+    tidyr::pivot_longer(
+    where(
+      is.numeric
+      )
+    ) |>
+  ungroup() |>
+  mutate(species_sex = glue::glue("{species}_{sex}") |>
+           as.character(),
+         .keep = 'unused') |>
+  ggplot(aes(x = species_sex, y = value, fill = species_sex)) +
+  geom_violin(drop = F) +
+  facet_wrap(~name, scales = 'free') +
+  theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank())
+```
+
+
+Vemos que a variável de espécie e sexo são aquelas a apresentarem maiores divisões entre os pinguins e assim desejamos ver que essa separação seja capturada pelos algoritmos de agrupamento
+
+É importante destacar que tais variáveis categóricas serão 'escondidas' para algoritmos de agrupamento.
+
+3 diferentes algoritmos foram utilizados: **AGNES, K-Means e Modelos de Misturas**
+
+## AGNES
+
+AGNES(AGglomerative NESting) é um método de agrupamento hierárquico aglomerativo.
+
+```{r}
+df_pengu_scl_num = df_pengu |>
+  select(
+    where(is.numeric)
+    ) |>
+  mutate(
+    across(
+      where(is.numeric), 
+    ~scale(.)
+    )
+  )
+
+
+agnes_cluter = df_pengu_scl_num |>
+  factoextra::get_dist() |>
+  hclust(method = 'complete')
+```
+
+
+
+
+
+
+```{r}
+fviz_nbclust(df_pengu_scl_num, FUN = hcut, method = "wss")
+fviz_nbclust(df_pengu_scl_num, FUN = hcut, method = "silhouette")
+fviz_nbclust(df_pengu_scl_num, FUN = hcut, method = "gap_stat")
+```
+
+
+```{r}
+plot(agnes_cluter)
+rect.hclust(agnes_cluter, k=5)
+```
+
+
+```{r}
+fviz_cluster(
+  list(data = df_pengu_scl_num, 
+       cluster = cutree(agnes_cluter, k = 5)),
+  ellipse = TRUE,
+  ellipse.type = "norm"
+  )
+```
+
+## K-Means
+
+A clusterização via K-means (MacQueen 1967) é um dos algoritmos de aprendizado de máquina não supervisionado mais comumente usados para particionar um determinado conjunto de dados em um conjunto de k grupos (ou seja, k clusters), onde k representa o número de grupos pré-especificados pelo analista.
+
+Assim como no método hierárquico, foi definido um número de grupos igual a 5
+
+```{r}
+kmeans_cluter = df_pengu_scl_num |> 
+  kmeans(centers = 5, nstart = 35)
+```
+
+```{r}
+fviz_cluster(kmeans_cluter, 
+             data = df_pengu_scl_num,
+             ellipse = TRUE,
+             ellipse.type = "norm"
+  )
+```
+
+
+## Misturas
+
+Para a aplicação de modelos de misturas, o pacote **flexmix**, já introduzido, foi utilizado
+
+O algoritmo se mostrou extremamente inconsistente, com diferentes resultados a cada execução
+
+```{r}
+df_pengu_scl_num %>%
+  flexmix::flexmix(bill_length_mm + bill_depth_mm + 
+                     flipper_length_mm + body_mass_g ~ 1, data = ., k = 5) 
+```
+
+```{r}
+df_pengu_scl_num %>%
+  flexmix::flexmix(bill_length_mm + bill_depth_mm + 
+                     flipper_length_mm + body_mass_g ~ 1, data = ., k = 5) 
+```
+
+
+```{r}
+df_pengu_scl_num %>%
+  flexmix::flexmix(bill_length_mm + bill_depth_mm + 
+                     flipper_length_mm + body_mass_g ~ 1, data = ., k = 5) 
+```
+
+
+
+É possível a execução da função resultou em grandes diferenças no tamanho de cada grupo quando essa convergia, e em certos casos o algoritmo não convergiu após 200 iterações. Vale destacar que a função não possui um argumento para definção do número máximo de iterações.
+
+# Etapa de Simulação 
+
+A segunda etapa do trabalho buscou estudar a capacidade de agrupamento do algoritmo utilizado no pacote via estudo de simulação
+
+Estudos de grupos menos e mais semelhantes entre si foi realizado, onde para isso foram definidos 3 simulações bases
+
+* Grupos diferentes apenas na média
+  - Foram simulados grupos que se diferem em 10, 5, e 1 unidade de média, com o desvio-padrão fixado em 1
+  
+```{r}
+mix_mean_change = 
+  list(near = 
+         tibble::tibble(
+           c1 = rnorm(100, mean = 0, sd = 1),
+           c2 = rnorm(100, mean = 1, sd = 1),
+           c3 = rnorm(100, mean = 2, sd = 1)),
+       between = 
+         tibble::tibble(
+           c1 = rnorm(100, mean = 0, sd = 1),
+           c2 = rnorm(100, mean = 5, sd = 1),
+           c3 = rnorm(100, mean = 10, sd = 1)),
+       far = 
+         tibble::tibble(
+           c1 = rnorm(100, mean = 0, sd = 1),
+           c2 = rnorm(100, mean = 10, sd = 1),
+           c3 = rnorm(100, mean = 20, sd = 1))
+       )
+```
+
+
+```{r}
+mix_mean_change |> 
+  as.data.frame() |> 
+  tidyr::pivot_longer(where(is.numeric)) |>
+  dplyr::mutate(name = name |>
+           stringr::str_remove_all("\\..*$")) |>
+  ggplot(aes(x = value, fill = name)) +
+  geom_histogram() +
+  facet_wrap(~name, ncol = 1, scales = 'free')
+```
+
+
+
+
+* Grupos diferentes apenas no desvio-padrão
+  - Foram simulados grupos que se diferem em 10, 5, e 1 unidade de desvio-padrão, com a média fixada em 0
+  
+```{r}
+mix_sd_change = 
+  list(near = 
+         tibble::tibble(
+           c1 = rnorm(100, mean = 0, sd = 1),
+           c2 = rnorm(100, mean = 0, sd = 2),
+           c3 = rnorm(100, mean = 0, sd = 3)),
+       between = 
+         tibble::tibble(
+           c1 = rnorm(100, mean = 0, sd = 1),
+           c2 = rnorm(100, mean = 0, sd = 5),
+           c3 = rnorm(100, mean = 0, sd = 10)),
+       far = 
+         tibble::tibble(
+           c1 = rnorm(100, mean = 0, sd = 1),
+           c2 = rnorm(100, mean = 0, sd = 10),
+           c3 = rnorm(100, mean = 0, sd = 20))
+       )
+```
+
+
+```{r}
+mix_sd_change |> 
+  as.data.frame() |> 
+  tidyr::pivot_longer(where(is.numeric)) |>
+  dplyr::mutate(name = name |>
+           stringr::str_remove_all("\\..*$")) |>
+  ggplot(aes(x = value, fill = name)) +
+  geom_histogram() +
+  facet_wrap(~name, ncol = 1, scales = 'free')
+```
+
+* Grupos diferentes em média e desvio-padrão
+  - Foram simulados grupos que se diferem em 5, e 1 unidade de média e desvio-padrão. Buscando a complexidade do trabalho, as seguintes combinações foram realizadas
+  
+  
+1. 1 unidades de distância na média
+  - 1, 2 e 5 unidades de distância no desvio padrão  
+  
+2. 3 unidades de distância na média
+  - 1, 2 e 5 unidades de distância no desvio padrão
+  
+
+  
+```{r}
+mix_mean_sd_change1 = 
+  list(near = 
+         tibble::tibble(
+           c1 = rnorm(100, mean = 0, sd = 1),
+           c2 = rnorm(100, mean = 3, sd = 2),
+           c3 = rnorm(100, mean = 6, sd = 3)),
+       between = 
+         tibble::tibble(
+           c1 = rnorm(100, mean = 0, sd = 1),
+           c2 = rnorm(100, mean = 3, sd = 3),
+           c3 = rnorm(100, mean = 6, sd = 5)),
+       far = 
+         tibble::tibble(
+           c1 = rnorm(100, mean = 0, sd = 1),
+           c2 = rnorm(100, mean = 3, sd = 5),
+           c3 = rnorm(100, mean = 6, sd = 10))
+       )
+
+mix_mean_sd_change2 = 
+  list(near = 
+         tibble::tibble(
+           c1 = rnorm(100, mean = 0, sd = 1),
+           c2 = rnorm(100, mean = 1, sd = 2),
+           c3 = rnorm(100, mean = 2, sd = 3)),
+       between = 
+         tibble::tibble(
+           c1 = rnorm(100, mean = 0, sd = 1),
+           c2 = rnorm(100, mean = 1, sd = 3),
+           c3 = rnorm(100, mean = 2, sd = 5)),
+       far = 
+         tibble::tibble(
+           c1 = rnorm(100, mean = 0, sd = 1),
+           c2 = rnorm(100, mean = 1, sd = 5),
+           c3 = rnorm(100, mean = 2, sd = 10))
+       )
+```
+  
+
+```{r}
+mix_mean_sd_change1 |> 
+  as.data.frame() |> 
+  tidyr::pivot_longer(where(is.numeric)) |>
+  dplyr::mutate(name = name |>
+           stringr::str_remove_all("\\..*$")) |>
+  ggplot(aes(x = value, fill = name)) +
+  geom_histogram() +
+  facet_wrap(~name, ncol = 1, scales = 'free')
+```
+
+
+```{r}
+mix_mean_sd_change2 |> 
+  as.data.frame() |> 
+  tidyr::pivot_longer(where(is.numeric)) |>
+  dplyr::mutate(name = name |>
+           stringr::str_remove_all("\\..*$")) |>
+  ggplot(aes(x = value, fill = name)) +
+  geom_histogram() +
+  facet_wrap(~name, ncol = 1, scales = 'free')
+```
+
+
+
+Para os 3 casos, foram simulados grupos a partir de uma distribuição Normal com tamanho amostral 300.
+
+
+## AGNES
+
+### Variando a Média
+
+
+Primeiramente o algoritmo foi aplicado nos grupos com seperação de 10 unidade na média
+
+```{r}
+agnes_far_cluster = mix_mean_change$far |>
+   tidyr::pivot_longer(
+    where(
+      is.numeric
+      )
+    ) |>
+  dplyr::pull(value) |>
+  factoextra::get_dist() |>
+  hclust(method = 'complete') 
+
+
+plot(agnes_far_cluster)
+rect.hclust(agnes_far_cluster, k=3)
+```
+
+A segunda etapa foi a aplicação do método nos dados com grupos se distanciando em 5 unidades na média
+
+```{r}
+agnes_between_cluster = mix_mean_change$between |>
+   tidyr::pivot_longer(
+    where(
+      is.numeric
+      )
+    ) |>
+  dplyr::pull(value) |>
+  factoextra::get_dist() |>
+  hclust(method = 'complete') 
+
+
+plot(agnes_between_cluster)
+rect.hclust(agnes_between_cluster, k=3)
+```
+
+
+A útlima etapa foi aplicação do método nos dados que possuiam os grupos mais próximos, com apenas 1 unidade de distancia na média
+
+```{r}
+agnes_near_cluster = mix_mean_change$near |>
+   tidyr::pivot_longer(
+    where(
+      is.numeric
+      )
+    ) |>
+  dplyr::pull(value) |>
+  factoextra::get_dist() |>
+  hclust(method = 'complete') 
+
+
+plot(agnes_near_cluster)
+rect.hclust(agnes_near_cluster, k=3)
+```
+
+### Variando o Desvio Padrão
+
+```{r}
+agnes_far_cluster = mix_sd_change$far |>
+   tidyr::pivot_longer(
+    where(
+      is.numeric
+      )
+    ) |>
+  dplyr::pull(value) |>
+  factoextra::get_dist() |>
+  hclust(method = 'complete') 
+
+
+plot(agnes_far_cluster)
+rect.hclust(agnes_far_cluster, k=3)
+```
+
+
+
+```{r}
+agnes_between_cluster = mix_sd_change$between |>
+   tidyr::pivot_longer(
+    where(
+      is.numeric
+      )
+    ) |>
+  dplyr::pull(value) |>
+  factoextra::get_dist() |>
+  hclust(method = 'complete') 
+
+
+plot(agnes_between_cluster)
+rect.hclust(agnes_between_cluster, k=3)
+```
+
+```{r}
+agnes_near_cluster = mix_sd_change$near |>
+   tidyr::pivot_longer(
+    where(
+      is.numeric
+      )
+    ) |>
+  dplyr::pull(value) |>
+  factoextra::get_dist() |>
+  hclust(method = 'complete') 
+
+
+plot(agnes_near_cluster)
+rect.hclust(agnes_near_cluster, k=3)
+```
+
+### Variando a Média e o Desvio Padrão
+
+```{r}
+agnes_far_cluster = mix_mean_sd_change1$far |>
+   tidyr::pivot_longer(
+    where(
+      is.numeric
+      )
+    ) |>
+  dplyr::pull(value) |>
+  factoextra::get_dist() |>
+  hclust(method = 'complete') 
+
+
+plot(agnes_far_cluster)
+rect.hclust(agnes_far_cluster, k=3)
+```
+
+```{r}
+agnes_between_cluster = mix_mean_sd_change1$between |>
+   tidyr::pivot_longer(
+    where(
+      is.numeric
+      )
+    ) |>
+  dplyr::pull(value) |>
+  factoextra::get_dist() |>
+  hclust(method = 'complete') 
+
+
+plot(agnes_between_cluster)
+rect.hclust(agnes_between_cluster, k=3)
+```
+
+
+```{r}
+agnes_near_cluster = mix_mean_sd_change1$near |>
+   tidyr::pivot_longer(
+    where(
+      is.numeric
+      )
+    ) |>
+  dplyr::pull(value) |>
+  factoextra::get_dist() |>
+  hclust(method = 'complete') 
+
+
+plot(agnes_near_cluster)
+rect.hclust(agnes_near_cluster, k=3)
+```
+
+
+-------------------
+
+
+```{r}
+agnes_far_cluster = mix_mean_sd_change2$far |>
+   tidyr::pivot_longer(
+    where(
+      is.numeric
+      )
+    ) |>
+  dplyr::pull(value) |>
+  factoextra::get_dist() |>
+  hclust(method = 'complete') 
+
+
+plot(agnes_far_cluster)
+rect.hclust(agnes_far_cluster, k=3)
+```
+
+```{r}
+agnes_between_cluster = mix_mean_sd_change2$between |>
+   tidyr::pivot_longer(
+    where(
+      is.numeric
+      )
+    ) |>
+  dplyr::pull(value) |>
+  factoextra::get_dist() |>
+  hclust(method = 'complete') 
+
+
+plot(agnes_between_cluster)
+rect.hclust(agnes_between_cluster, k=3)
+```
+
+
+```{r}
+agnes_near_cluster = mix_mean_sd_change2$near |>
+   tidyr::pivot_longer(
+    where(
+      is.numeric
+      )
+    ) |>
+  dplyr::pull(value) |>
+  factoextra::get_dist() |>
+  hclust(method = 'complete') 
+
+
+plot(agnes_near_cluster)
+rect.hclust(agnes_near_cluster, k=3)
+```
+
+ 
+## K-Means
+
+### Variando a Média
+
+```{r}
+kmeans_far_cluster = mix_mean_change$far |>
+   tidyr::pivot_longer(
+    where(
+      is.numeric
+      )
+    ) |>
+  dplyr::pull(value) |> 
+  kmeans(centers = 3, nstart = 35)
+```
+
